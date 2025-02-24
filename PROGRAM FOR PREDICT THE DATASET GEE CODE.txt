@@ -1,0 +1,104 @@
+//PROGRAM FOR PREDICT THE DATASET ALSO GET THE CSV 
+// Define time range
+var start_date = '2023-01-01';
+var end_date = '2023-12-31';
+
+// Load India state boundaries
+var india_states = ee.FeatureCollection("FAO/GAUL/2015/level1")
+  .filter(ee.Filter.eq('ADM0_NAME', 'India'));
+
+// Load datasets
+var ndvi_dataset = ee.ImageCollection('MODIS/006/MOD13A2')
+  .filterDate(start_date, end_date)
+  .select('NDVI')
+  .mean();
+
+var temp_dataset = ee.ImageCollection('ECMWF/ERA5_LAND/DAILY_AGGR')
+  .filterDate(start_date, end_date)
+  .select('temperature_2m')
+  .mean();
+
+var precip_dataset = ee.ImageCollection('UCSB-CHG/CHIRPS/DAILY')
+  .filterDate(start_date, end_date)
+  .select('precipitation')
+  .mean();
+
+// Dictionary: Mapping states to their famous crops
+var stateToCrop = {
+  "Andhra Pradesh": "Rice",
+  "Arunachal Pradesh": "Maize",
+  "Assam": "Tea",
+  "Bihar": "Wheat",
+  "Chhattisgarh": "Rice",
+  "Goa": "Coconut",
+  "Gujarat": "Groundnut",
+  "Haryana": "Wheat",
+  "Himachal Pradesh": "Apple",
+  "Jharkhand": "Rice",
+  "Karnataka": "Sugarcane",
+  "Kerala": "Coconut",
+  "Madhya Pradesh": "Wheat",
+  "Maharashtra": "Cotton",
+  "Manipur": "Rice",
+  "Meghalaya": "Potato",
+  "Mizoram": "Rice",
+  "Nagaland": "Rice",
+  "Odisha": "Rice",
+  "Punjab": "Wheat",
+  "Rajasthan": "Bajra",
+  "Sikkim": "Cardamom",
+  "Tamil Nadu": "Rice",
+  "Telangana": "Rice",
+  "Tripura": "Pineapple",
+  "Uttar Pradesh": "Sugarcane",
+  "Uttarakhand": "Wheat",
+  "West Bengal": "Rice"
+};
+
+// Function to extract data for each state
+var extractDataForState = function(state) {
+  var state_name = state.get('ADM1_NAME'); // Get state name
+  var crop_name = ee.Algorithms.If(stateToCrop[state_name], stateToCrop[state_name], "Unknown"); // Get crop name
+
+  // Clip datasets to state boundary
+  var ndvi = ndvi_dataset.clip(state);
+  var temp = temp_dataset.clip(state);
+  var precip = precip_dataset.clip(state);
+
+  // Combine all bands
+  var dataset = ndvi.addBands(temp).addBands(precip);
+
+  // Generate random points for sampling
+  var points = ee.FeatureCollection.randomPoints({
+    region: state.geometry(),
+    points: 500,  // Adjust number of points as needed
+    seed: 42
+  });
+
+  // Sample the dataset at the points
+  var sampled_data = dataset.sampleRegions({
+    collection: points,
+    scale: 500,
+    geometries: true
+  });
+
+  // Add state name and crop name to each feature
+  sampled_data = sampled_data.map(function(f) {
+    return f.set('State', state_name).set('Crop Name', crop_name);
+  });
+
+  return sampled_data;
+};
+
+// Map function over all states
+var all_states_data = india_states.map(extractDataForState).flatten();
+
+// Print sample data
+print('Sample Data:', all_states_data.limit(10));
+
+// Export data to Google Drive as CSV
+Export.table.toDrive({
+  collection: all_states_data,
+  description: 'Crop_Yield_Data_India',
+  fileFormat: 'CSV'
+});
